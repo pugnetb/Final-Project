@@ -1,0 +1,298 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# UNITS INFORMATION:
+# Length: 1 AU = 1.496*10**11 m
+# Time: 1 year = 365.25 days = 3.156*10**7 s
+# Velocity: 1 AU/ year
+# M_unit = 1.99*10**30 kg
+# G = 6.67*10**-11N*m^2/kg^2
+# conversion from year to hour: 1 year = 365.25 * 24 hours
+
+#Finds the acceleration of a body based on the position values and masses
+def two_body(r, t, m):
+    #Finds relative position vectors
+    x12 = r[0,0] - r[0,1]
+    x21 = -x12
+    y12 = r[1,0] - r[1,1]
+    y21 = -y12
+    #relative magnitudes
+    r12 = np.sqrt(x12**2 + y12**2)
+    r21 = r12
+    #assigns masses
+    m1 = m[0]
+    m2 = m[1]
+    #acceleration along each dimension
+    ax1 = -G*m2*x12/r12**3 
+    ay1 = -G*m2*y12/r12**3 
+    ax2 = -G*m1*x21/r21**3 
+    ay2 = -G*m1*y21/r21**3 
+    #creates acceleration array
+    a = [[ax1, ax2], [ay1, ay2]]
+    a = np.array(a)
+    return a
+
+#Determines the trajectory of the bodies
+def Verlet_trajectory(F, r, v, t_array, m):
+    
+    npoints = len(t_array)
+    t = 0
+    
+    #position arrays
+    x_data = np.zeros([npoints,2])
+    y_data = np.zeros([npoints,2])
+    vx_data = np.zeros([npoints,2])
+    vy_data = np.zeros([npoints,2])
+       
+    for ii in range(npoints):
+        #print(ii/8766)    
+        #Sets initial conditions
+        if ii == 0:
+            
+            x_data[0,:] = r[0,:]
+            y_data[0,:] = r[1,:]
+            vx_data[0,:] = v[0,:]
+            vy_data[0,:] = v[1,:]
+            
+            current_position = r
+            current_velocity = v
+        #Finds next position and velocity steps    
+        else:            
+            a = F(current_position, t, m)
+            new_position = current_position + current_velocity * dt + 0.5 *dt**2 * a
+            
+            a2 = F(new_position, t, m)  
+            new_velocity = current_velocity + 0.5 * dt * (a + a2)
+            
+            t += dt  
+            #Stores data in these arrays
+            x_data[ii, :] = new_position[0, :]
+            y_data[ii, :] = new_position[1, :]
+            vx_data[ii, :] = new_velocity[0, :]
+            vy_data[ii, :] = new_velocity[1, :]
+            
+            current_position = new_position
+            current_velocity = new_velocity
+    
+    return x_data, y_data, vx_data, vy_data    
+
+
+#Finds the kinetic and potential energie at each step
+def E(x, y, vx, vy, m):
+    
+    #Kinetic Energy
+    v_tot = np.sqrt(vx**2 + vy**2)
+    kinetic_E = (.5 * m * v_tot**2)* energy_conversion
+    
+    #Potential Energy
+    npoints = len(x)
+    potential_E = np.zeros([len(x),2])
+    body = [0,1]
+    #Finds the potential energy for the body in question for all points        
+    for i in range(2):
+        current_mass = 0
+        other_masses = []
+        #Find which mass is the body in question
+        for ii in range(2):
+            body = [0,1]
+            if ii == body[i]:
+                current_mass = i
+            else:
+                other_masses.append(body[ii])
+        
+        #Finds relative positions
+        other_masses = np.array(other_masses)
+        x_diff = x[:,0] - x[:,1]
+        y_diff = y[:,0] - y[:,1]
+
+        #Finds the potential energy for the body in question for all points        
+        for jj in range(npoints):
+            distance_apart = np.sqrt((x_diff[jj]**2) + (y_diff[jj])**2)
+            potential_E[jj,i] = -G * m[current_mass] * m[other_masses[0]] / distance_apart *energy_conversion
+    #solves for the potential energy of the system to avoid double counting
+    potential_system = np.zeros(npoints)
+    for i in range(npoints):
+        potential_system[i] = np.sum(potential_E[i,:])/len(m)
+    
+    total_E = np.zeros(npoints)
+    for i in range(npoints):
+        total_E[i] = np.sum(kinetic_E[i,:]) + potential_system[i]
+    
+    return kinetic_E, potential_system , total_E
+
+
+#Finds the tidal force for a particular point at each step of the trajectory
+def Tidal_Force(x, y, m, R_E):
+    
+    #arrays to store directional forces as well as the normal to the surface
+    tide_force = np.zeros([len(x),2])
+    tide_mag = np.zeros([len(x)])
+    phi = 0 #initial azimuthal angle
+    hour_step = 2*np.pi*365.25*dt #rotates vector over 2pi ever year (not always an hour step)
+    
+    #applies the tidal force equation from my report for a given configuration
+    for i in range(len(tide_force)):
+        
+        #initial point is on Earth's left
+        direction = np.array([-np.cos(phi), np.sin(phi)])
+        
+        #vector from the sun to earth
+        x_dir = x[i,0] - x[i,1]
+        y_dir = y[i,0] - y[i,1]
+        
+        d0_vector = np.array([x_dir, y_dir])
+        d0_mag = np.sqrt(d0_vector[0]**2 + d0_vector[1]**2)
+        d0_unit = d0_vector/d0_mag
+        
+        radius_vector = np.array([-R_E*np.cos(phi), R_E*np.sin(phi)])
+        
+        d_vector = np.array(d0_vector + radius_vector)
+        d_mag = np.sqrt(d_vector[0]**2 + d_vector[1]**2)
+        d_unit = d_vector/d_mag
+        
+        #computes tidal force
+        tide_force[i,:] = -G*(1/mass_conversion)*m[1]*(d_unit/d_mag**2 - d0_unit/d0_mag**2)
+        #finds tidal force normal to the surface
+        tide_mag[i] = np.dot(direction, tide_force[i,:])
+        phi = phi + hour_step
+    #converts back to SI units    
+    tide_force = tide_force*force_conversion
+    tide_mag = tide_mag*force_conversion
+    
+    return tide_force, tide_mag
+
+#Creates a Poincare plot of tidal data
+def Poincare(transient_cutoff, n, x, t, dt):
+    
+    #gets rid of transient points
+    transient_cutoff_scaled = transient_cutoff/dt
+    transient_cutoff_scaled = int(transient_cutoff_scaled)
+    
+    x_new = []
+    t_new = []
+    
+    #Creates new arrays without transient points
+    for ii in range(len(x[:])):
+        #print(ii)
+        if ii > transient_cutoff_scaled:
+            #print(ii)
+            x_new.append(x[ii])
+            t_new.append(t[ii])
+    
+    #defines the sampling timescale
+    Poincare_step = int(n/dt)
+         
+    x0_Poincare = []
+    x1_Poincare = []
+    
+    #initial condition
+    x0_Poincare.append(x_new[0])
+    
+    indicie = 0
+    
+    point_num = int(len(x_new)/Poincare_step)
+    
+    #loops through all points and reassigns them into two arrays
+    for i in range(point_num):
+        next_indicie = indicie + Poincare_step
+        x1_val = x_new[next_indicie]
+        x1_Poincare.append(x1_val)
+        
+        indicie = next_indicie
+        
+        if i < point_num-1:
+            x0_Poincare.append(x1_val)
+            
+    x0_Poincare = np.array(x0_Poincare)
+    x1_Poincare = np.array(x1_Poincare)
+                
+    return x0_Poincare, x1_Poincare, x_new, t_new
+    
+#%%        
+#Conversions
+mass_conversion = 1.99*10**30 # kilograms
+length_conversion = 1.496*10**11 # meters
+time_conversion = 365.25 * 24 * 60 * 60 #in seconds
+force_conversion = mass_conversion*length_conversion/time_conversion**2
+energy_conversion = mass_conversion * length_conversion**2 /(time_conversion)**2
+G_conversion = mass_conversion * time_conversion**2 / length_conversion**3
+
+hour = 1/(365.25 * 24)
+
+#initial conditions
+r = np.array([[1.017, 0.0], [0.0, 0.0]]).T
+v = np.array([[0.0, 6.179], [0.0, 0.0]]).T
+R_E = 6.3781*10**6/length_conversion  
+
+#time initialization        
+t0 = 0.0
+tf = 5.0
+dt = hour
+t_array = np.arange(t0,tf,dt)
+
+#mass parameters
+G = 6.6743 * 10**-11 * G_conversion
+m_sun = 1.9885*10**30/mass_conversion
+m_earth = 5.9722*10**24/mass_conversion
+
+m = np.array([m_earth, m_sun])
+
+#Poincare parameters
+transient_cutoff = 1.0 #years
+n = 24*hour
+
+#functions
+x, y, vx, vy = Verlet_trajectory(two_body, r, v, t_array, m)       
+KE, PE, total_energy = E(x, y, vx, vy, m)
+tide, tide_mag = Tidal_Force(x, y, m, R_E)
+x0, x1, x_cutoff, t_cutoff = Poincare(transient_cutoff, n, tide_mag, t_array, dt)
+
+t_array = t_array*365.25
+r = np.sqrt(x**2 + y**2)
+
+#%%plots
+plt.figure(1)
+plt.plot(x[0:8766,1],y[0:8766,1])
+plt.xlabel('x (AU)')
+plt.ylabel('y (AU)')
+plt.title('Trajectory of the Sun')
+
+plt.figure(2)
+plt.plot(t_array,vy)
+plt.xlabel('time (units)')
+plt.ylabel('Y-Direction Velocity (AUM/year)')
+plt.title('Y Velocity vs Time')
+
+plt.figure(3)
+plt.plot(t_array, KE[:,0], label = 'KE Earth')
+plt.plot(t_array, KE[:,1], label = 'KE Sun')
+plt.plot(t_array, PE, label = 'System PE')
+plt.plot(t_array, total_energy, label = 'Total Energy',linewidth = 5.0)
+plt.xlabel('time (days)')
+plt.ylabel('Energy (J)')
+plt.title('Energy vs Time')
+plt.legend()
+
+plt.figure(4)
+plt.plot(t_array, tide[:,0])
+plt.xlabel('Time (units)')
+plt.ylabel('Tidal Force X-Direction')
+plt.title('Tidal Force in the X-Direction vs Time')
+
+plt.figure(5)
+plt.plot(t_array, tide[:,1])
+plt.xlabel('Time (units)')
+plt.ylabel('Tidal Force Y-Direction')
+plt.title('Tidal Force in the Y-Direction vs Time')
+
+plt.figure(6)
+plt.plot(t_array, tide_mag)
+plt.xlabel('Time (hours)')
+plt.ylabel('Tidal Force Per Unit Mass (N/kg)')
+plt.title('Tidal Force Per Kilogram Normal to Earth vs Time')
+
+plt.figure(7)
+plt.plot(x0,x1)
+plt.ylabel('X_i+1')
+plt.xlabel('X_i')
+plt.title('Poincare Plot for Tidal Force Per Kilogram Each Day For One Year')
